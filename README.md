@@ -38,18 +38,6 @@ datadog will trigger an alert.
 Second, the metric gives an idea of rate of new RPMs arriving in the repo that can be trended and graphed (or even alerted
 if load gets really high in the future).
 
-# Updating the Repo Manager
-Update the python script in this directory, and then upload that file to the root of the <s3bucket> that it manages. Then
-terminate the currently running instance.  Since it is in an auto-scaling group, a new instance will be started and download
-the new copy of the script upon startup.
-
-# Creating a new Yum Repo Manager
-Use Cloudformation to launch a new stack.
-
-    aws cloudformation create-stack --template-body file:///gitwork/cloudops/cloudformation/yum-repo-manager.json --stack-name cloudops-dev-yumrepomanager --parameters ParameterKey=env,ParameterValue=dev ParameterKey=email,ParameterValue=matthew.bogner@lithium.com ParameterKey=keypairName,ParameterValue=cloudops ParameterKey=roleDescrip,ParameterValue="yum repo manager for bucket lithium-dev-yumrepo" ParameterKey=bucketName,ParameterValue=lithium-dev-yumrepo --profile lithiumdev --region us-west-1
-
-    aws cloudformation create-stack --template-body file:///gitwork/cloudops/cloudformation/yum-repo-manager.json --stack-name cloudops-prod-yumrepomanager --parameters ParameterKey=env,ParameterValue=prod ParameterKey=email,ParameterValue=matthew.bogner@lithium.com ParameterKey=keypairName,ParameterValue=cloudops ParameterKey=roleDescrip,ParameterValue="yum repo manager for bucket lithium-prod-yumrepo" ParameterKey=bucketName,ParameterValue=lithium-prod-yumrepo --profile lithiumprod --region us-west-1
-
 # View a list of scheduled jobs
 View the scheduledJobs route
 
