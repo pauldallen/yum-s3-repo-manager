@@ -39,6 +39,8 @@ app = Flask(__name__)
 
 logging.basicConfig()
 
+version = "1.0.0"
+
 def parseArgs():
     parser = OptionParser("usage: %prog [options]")
     parser.add_option("-b", "--bucket-name",        dest="yumRepoBucketName",   default="lithium-all-yumrepo",                   help="The name of an existing S3 bucket [default: %default]")
@@ -49,6 +51,7 @@ def parseArgs():
     parser.add_option("-c", "--cachedir",           dest="localCache",          default="/media/ephemeral0/repocache",           help="The fully qualified path of an existing local folder where the repository cache can be stored (preferrably SSD or ephemeral disk).  No trailing slash necessary. (i.e. \"/tmp/repostaging\") [default: %default]")
     parser.add_option("-t", "--time-interval",      dest="timeInterval",        default="60",  type="int",                       help="The time interval and seconds between polling [default: %default]")
     parser.add_option("-d", "--debug",              dest="debug",               default=False, action="store_true",              help="Whether or not to run the app in debug mode [default: %default]")
+    parser.add_option("-v", "--version",            dest="version",             default=False, action="store_true",              help="Output the version of this script and exit")
     parser.add_option("--log-file",                 dest="logFile",             default="/var/log/yum-repo-manager/manager.log", help="The log file in which to dump debug information [default: %default]")
     parser.add_option("--pruneAgeDays",             dest="pruneAgeDays",        default="60",  type="int",                       help="Prune packages from the repo that are older than this number of days and for which we have more than --keep-at-least copies of it [default: %default]")
     parser.add_option("--keep-at-least",            dest="keepAtLeast",         default="10",  type="int",                       help="Keep at least this many copies of each individual package [default: %default]")
@@ -327,6 +330,10 @@ def scheduledJobs():
 
 lastRuns = deque()
 (options, args) = parseArgs()
+
+if options.version:
+    print version
+    sys.exit(0)
 
 if not options.debug and not isOnlyInstance():
     # This application is already running! Aborting...
