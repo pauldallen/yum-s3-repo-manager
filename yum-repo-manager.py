@@ -4,6 +4,7 @@
 # License: Restricted
 # Author(s):
 #   - Matthew Bogner (matthew.bogner@lithium.com)
+#   - Paul Allen (paul.allen@lithium.com)
 #
 # Description:
 #
@@ -18,6 +19,7 @@
 # Deps requiring separate install
 import boto                                  # https://github.com/boto/boto#installation
 import boto.utils
+from boto.exception import S3ResponseError
 from flask import Flask, url_for, jsonify    # http://flask.pocoo.org/
 from apscheduler.scheduler import Scheduler  # http://pythonhosted.org/APScheduler/#installing-apscheduler
 from dogapi import dog_http_api as api       # pip install dogapi
@@ -36,10 +38,11 @@ from optparse import OptionParser
 from collections import deque
 
 app = Flask(__name__)
+skippedKeys = []
 
 logging.basicConfig()
 
-version = "1.0.0"
+version = "1.0.1"
 
 def parseArgs():
     parser = OptionParser("usage: %prog [options]")
@@ -60,16 +63,21 @@ def parseArgs():
     parser.add_option("--per-folder",               dest="perFolder",           default=False, action="store_true",              help="Setup per folder repo. [default: %default]")
     return parser.parse_args()
 
-
-def recordRun(inboxKeys):
+"""
+This method is intended to record in datadog the count of any type of keys found in s3.
+The only two types used right now are the cound of keys proccessed in the inbox, and the count
+of keys skipped due to any sort of exception
+"""
+def recordKeys(keys, keyType = 'inbox'):
     details = {}
+    keyTypeLabel = "%sKeys" % keyType
     details["timestamp"] = str(datetime.datetime.now())
-    details["numInboxKeys"] = len(inboxKeys)
+    details[keyTypeLabel] = len(keys)
     keyNames = []
-    if len(inboxKeys) > 0:
-        for key in inboxKeys:
+    if len(keys) > 0:
+        for key in keys:
             keyNames.append(key.name)
-    details["inboxKeys"] = keyNames
+    details[keyTypeLabel] = keyNames
 
     lastRuns.append(details)
     if len(lastRuns) > 60:
@@ -80,18 +88,14 @@ def recordRun(inboxKeys):
         api.application_key = options.datadogAppKey
         api.timeout = 15
         api.swallow = False
-
-        metricName = "cloudops.yumrepomanager.%s" % options.yumRepoBucketName.replace('-', '_')
+        metricName = "cloudops.yumrepomanager.%s.%s" % (options.yumRepoBucketName.replace('-', '_'), keyTypeLabel)
         log("Publishing metric to datadog: %s..." % metricName)
-        log("   --> %s" % json.dumps(api.metric(metricName, len(inboxKeys))))
-
-
+        log("   --> %s" % json.dumps(api.metric(metricName, len(keys))))
 
 def chompLeft(original, removeFromLeft):
     if original.startswith(removeFromLeft):
         return original[len(removeFromLeft):]
     return original
-
 
 def log(statement):
     if not os.path.exists(os.path.dirname(options.logFile)):
@@ -106,7 +110,6 @@ def log(statement):
         else:
             logFile.write("%s -    %s\n" % (ts, line))
     logFile.close()
-
 
 """
 Get a connection to S3 through one of two possible methods.
@@ -135,7 +138,6 @@ def getS3Cxn():
 
         return boto.connect_s3(accessKeyId, secretAccessKey)
 
-
 """
 Iterates over all the keys in the buckets "inbox" folder and returns an array
 of the boto.s3.key.Key objects corresponding to files that need to be copied.  
@@ -157,7 +159,9 @@ Download the remote keys to the local destination folder, optionally removing a 
 before creating the final local directory structure.
 """
 def downloadKeys(keys, localDestination, removePrefixFromKeyName = None):
+    global skippedKeys
     log("Downloading keys to local staging area...")
+    skippedKeys = []
     for key in keys:
         keyName = key.name
         if removePrefixFromKeyName != None:
@@ -168,16 +172,23 @@ def downloadKeys(keys, localDestination, removePrefixFromKeyName = None):
         if not os.path.exists(localDir):
             os.makedirs(localDir)
         log("   --> %s" % (localFileName))
-        key.get_contents_to_filename(localFileName)
+        try:
+            key.get_contents_to_filename(localFileName)
+        except S3ResponseError, e:
+            log("      --> Error downloading file from s3 [%s] - skipping..." % key.name)
+            skippedKeys.append(key)
+    recordKeys(skippedKeys, 'skipped')
 
 """
 Delete the provided list of S3 keys
 """
 def deleteKeys(keys):
+    global skippedKeys
     # Now that everything has been successfully copied - delete the source keys
     for key in keys:
-        log("   --> deleting %s" % key.name)
-        key.delete()
+        if key not in skippedKeys:
+            log("   --> deleting %s" % key.name)
+            key.delete()
 
 """
 Execute a shell command (i.e. createrepo)
@@ -256,7 +267,7 @@ def manageYumRepo():
 
     # Look in the inbox to see if there are any new files to add to the repo
     inboxKeys = getKeysInInbox(s3Cxn)
-    recordRun(inboxKeys)
+    recordKeys(inboxKeys, 'inbox')
     if len(inboxKeys) < 1:
         log("Nothing in the inbox - no work to do.")
         return
