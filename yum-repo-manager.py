@@ -49,7 +49,6 @@ from optparse import OptionParser
 from collections import deque
 
 app = Flask(__name__)
-skippedKeys = []
 
 logging.basicConfig()
 
@@ -76,7 +75,7 @@ def parseArgs():
 
 """
 This method is intended to record in datadog the count of any type of keys found in s3.
-The only two types used right now are the cound of keys proccessed in the inbox, and the count
+The only two types used right now are the count of keys proccessed in the inbox, and the count
 of keys skipped due to any sort of exception
 """
 def recordKeys(keys, keyType = 'inbox'):
@@ -170,7 +169,6 @@ Download the remote keys to the local destination folder, optionally removing a 
 before creating the final local directory structure.
 """
 def downloadKeys(keys, localDestination, removePrefixFromKeyName = None):
-    global skippedKeys
     log("Downloading keys to local staging area...")
     skippedKeys = []
     for key in keys:
@@ -189,12 +187,12 @@ def downloadKeys(keys, localDestination, removePrefixFromKeyName = None):
             log("      --> Error downloading file from s3 [%s] - skipping..." % key.name)
             skippedKeys.append(key)
     recordKeys(skippedKeys, 'skipped')
+    return skippedKeys
 
 """
-Delete the provided list of S3 keys
+Delete the provided list of S3 keys, leaving around anything in skippedKeys
 """
-def deleteKeys(keys):
-    global skippedKeys
+def deleteKeys(keys, skippedKeys):
     # Now that everything has been successfully copied - delete the source keys
     for key in keys:
         if key not in skippedKeys:
@@ -298,7 +296,7 @@ def manageYumRepo():
     log("Completed sync operation")
 
     # Download the files from the inbox into the local repo staging area
-    downloadKeys(inboxKeys, options.localStagingArea + "/" + options.repoFolderName, options.inboxFolderName + "/")
+    skippedKeys = downloadKeys(inboxKeys, options.localStagingArea + "/" + options.repoFolderName, options.inboxFolderName + "/")
 
     # Prune old repo contents
     pruneRepo()
@@ -320,7 +318,7 @@ def manageYumRepo():
 
     # Now that we have successfully synced the results back up to s3, remove inbox items that were just processed
     log("Removing entries from inbox...")
-    deleteKeys(inboxKeys)
+    deleteKeys(inboxKeys, skippedKeys)
 
     log("Completed")
 
