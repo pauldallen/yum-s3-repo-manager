@@ -52,11 +52,11 @@ app = Flask(__name__)
 
 logging.basicConfig()
 
-version = "1.0.1"
+version = "1.0.2"
 
 def parseArgs():
     parser = OptionParser("usage: %prog [options]")
-    parser.add_option("-b", "--bucket-name",        dest="yumRepoBucketName",   default=None,                   help="The name of an existing S3 bucket [default: %default]")
+    parser.add_option("-b", "--bucket-name",        dest="yumRepoBucketNames",  default=[], action="append"                      help="The list of names of an existing S3 bucket. *NOTE* all buckets must be in the same region [default: %default]")
     parser.add_option("--bucket-region",            dest="yumRepoBucketRegion", default="us-west-1",                             help="The region of the S3 bucket [default: %default]")
     parser.add_option("-i", "--inbox-folder-name",  dest="inboxFolderName",     default="inbox",                                 help="The relative folder name for the inbox inside the S3 bucket.  No preceding or trailing slash necessary. (i.e. \"inbox\") [default: %default]")
     parser.add_option("-r", "--repo-folder-name",   dest="repoFolderName",      default="repo",                                  help="The relative folder name for the actual repo inside the S3 bucket.  No preceding or trailing slash necessary. (i.e. \"repo\") [default: %default]")
@@ -78,7 +78,7 @@ This method is intended to record in datadog the count of any type of keys found
 The only two types used right now are the count of keys proccessed in the inbox, and the count
 of keys skipped due to any sort of exception
 """
-def recordKeys(keys, keyType = 'inbox'):
+def recordKeys(keys, keyType = 'inbox', yumRepoBucketName):
     details = {}
     keyTypeLabel = "%sKeys" % keyType
     details["timestamp"] = str(datetime.datetime.now())
@@ -98,7 +98,7 @@ def recordKeys(keys, keyType = 'inbox'):
         api.application_key = options.datadogAppKey
         api.timeout = 15
         api.swallow = False
-        metricName = "cloudops.yumrepomanager.%s.%s" % (options.yumRepoBucketName.replace('-', '_'), keyTypeLabel)
+        metricName = "cloudops.yumrepomanager.%s.%s" % (yumRepoBucketName.replace('-', '_'), keyTypeLabel)
         log("Publishing metric to datadog: %s..." % metricName)
         log("   --> %s" % json.dumps(api.metric(metricName, len(keys))))
 
@@ -152,10 +152,10 @@ def getS3Cxn():
 Iterates over all the keys in the buckets "inbox" folder and returns an array
 of the boto.s3.key.Key objects corresponding to files that need to be copied.  
 """
-def getKeysInInbox(s3Cxn):
+def getKeysInInbox(s3Cxn, yumRepoBucketName):
     log("Checking inbox...")
     inbox = []
-    bucket = s3Cxn.get_bucket(options.yumRepoBucketName, validate=False)
+    bucket = s3Cxn.get_bucket(yumRepoBucketName, validate=False)
     log("   --> obtained bucket")
     keys = bucket.list(prefix=options.inboxFolderName + "/")
     log("   --> obtained keys")
@@ -217,13 +217,13 @@ def isOnlyInstance():
 We never want to completely remove a package from our repo. So we will always keep at least X versions of any particular package.
 If we have any more than X versions of a particular package, then we will remove any versions older than some age threshold.
 """
-def pruneRepo():
+def pruneRepo(yumRepoBucketName):
     if options.perFolder:
-        for subdir in os.listdir(options.localStagingArea + "/" + options.repoFolderName):
-            if os.path.isdir(options.localStagingArea + "/" + options.repoFolderName + "/" + subdir):
-                pruneRepoFolder(options.localStagingArea + "/" + options.repoFolderName + "/" + subdir)
+        for subdir in os.listdir(options.localStagingArea + "/" + yumRepoBucketName):
+            if os.path.isdir(options.localStagingArea + "/" + yumRepoBucketName + "/" + subdir):
+                pruneRepoFolder(options.localStagingArea + "/" + yumRepoBucketName + "/" + subdir)
     else:
-        pruneRepoFolder(options.localStagingArea + "/" + options.repoFolderName)
+        pruneRepoFolder(options.localStagingArea + "/" + yumRepoBucketName)
 
 def pruneRepoFolder(repoFolder):
     nowSec = time.time()
@@ -243,16 +243,16 @@ def pruneRepoFolder(repoFolder):
 """
 Create the repo metadata for the folder(s) containing the RPMs
 """
-def createRepo():
+def createRepo(yumRepoBucketName):
     if options.perFolder:
-        for subdir in os.listdir(options.localStagingArea + "/" + options.repoFolderName):
-            if os.path.isdir(options.localStagingArea + "/" + options.repoFolderName + "/" + subdir):
+        for subdir in os.listdir(options.localStagingArea + "/" + yumRepoBucketName):
+            if os.path.isdir(options.localStagingArea + "/" + yumRepoBucketName + "/" + subdir):
                 if not os.path.exists(options.localCache + "/" + subdir):
                     os.makedirs(options.localCache + "/" + subdir)
 
-                updateRepoMetadata(options.localStagingArea + "/" + options.repoFolderName + "/" + subdir, options.localCache + "/" + subdir)
+                updateRepoMetadata(options.localStagingArea + "/" + yumRepoBucketName + "/" + subdir, options.localCache + "/" + subdir)
     else:
-        updateRepoMetadata(options.localStagingArea + "/" + options.repoFolderName, options.localCache)
+        updateRepoMetadata(options.localStagingArea + "/" + yumRepoBucketName, options.localCache)
 
 def updateRepoMetadata(repoFolder, repoCacheDir):
     # Create (or update) the local repo
@@ -269,58 +269,58 @@ def updateRepoMetadata(repoFolder, repoCacheDir):
 This is the main portion of the app that checks the inbox and coordinates getting the repo updated.
 """
 def manageYumRepo():
-    log("=================================================")
+    for yumRepoBucketName in options.yumRepoBucketNames:
+        log("=================================================")
 
-    # Get a connection to S3 through one of a couple different methods
-    s3Cxn = getS3Cxn()
+        # Get a connection to S3 through one of a couple different methods
+        s3Cxn = getS3Cxn()
 
-    # Look in the inbox to see if there are any new files to add to the repo
-    inboxKeys = getKeysInInbox(s3Cxn)
-    recordKeys(inboxKeys, 'inbox')
-    if len(inboxKeys) < 1:
-        log("Nothing in the inbox - no work to do.")
-        return
+        # Look in the inbox to see if there are any new files to add to the repo
+        inboxKeys = getKeysInInbox(s3Cxn, yumRepoBucketName)
+        recordKeys(inboxKeys, 'inbox', yumRepoBucketName)
+        if len(inboxKeys) < 1:
+            log("Nothing in the inbox - no work to do.")
+            return
 
-    # Since there is something in the inbox, sync the entire repo locally.  The first time, this could be pretty slow.
-    # We need to be good about pruning our repos to keep them to a manageable size.
-    if not os.path.exists(options.localStagingArea + "/" + options.repoFolderName):
-        os.makedirs(options.localStagingArea + "/" + options.repoFolderName)
-    log("Syncing remote repo to local staging area...")
-    log(execute(["/usr/bin/aws",
-                 "s3",
-                 "sync",
-                 "s3://" + options.yumRepoBucketName + "/" + options.repoFolderName,
-                 options.localStagingArea + "/" + options.repoFolderName,
-                 "--region",
-                 options.yumRepoBucketRegion]))
-    log("Completed sync operation")
+        # Since there is something in the inbox, sync the entire repo locally.  The first time, this could be pretty slow.
+        # We need to be good about pruning our repos to keep them to a manageable size.
+        if not os.path.exists(options.localStagingArea + "/" + yumRepoBucketName):
+            os.makedirs(options.localStagingArea + "/" + yumRepoBucketName)
+        log("Syncing remote repo to local staging area...")
+        log(execute(["/usr/bin/aws",
+                     "s3",
+                     "sync",
+                     "s3://" + yumRepoBucketName + "/" + yumRepoBucketName,
+                     options.localStagingArea + "/" + yumRepoBucketName,
+                     "--region",
+                     options.yumRepoBucketRegion]))
+        log("Completed sync operation")
 
-    # Download the files from the inbox into the local repo staging area
-    skippedKeys = downloadKeys(inboxKeys, options.localStagingArea + "/" + options.repoFolderName, options.inboxFolderName + "/")
+        # Download the files from the inbox into the local repo staging area
+        skippedKeys = downloadKeys(inboxKeys, options.localStagingArea + "/" + yumRepoBucketName, options.inboxFolderName + "/")
 
-    # Prune old repo contents
-    pruneRepo()
+        # Prune old repo contents
+        pruneRepo(yumRepoBucketName)
 
-    # Create the repo metadata
-    createRepo()
+        # Create the repo metadata
+        createRepo(yumRepoBucketName)
 
-    # Sync the local copy of the repo back up to the s3 bucket.  Use the --delete option so that anything in the repo that was pruned will get removed from the bucket
-    log("Syncing local staging area to remote repo...")
-    log(execute(["/usr/bin/aws",
-                 "s3",
-                 "sync",
-                 options.localStagingArea + "/" + options.repoFolderName,
-                 "s3://" + options.yumRepoBucketName + "/" + options.repoFolderName,
-                 "--delete",
-                 "--region",
-                 options.yumRepoBucketRegion]))
-    log("Completed sync operation")
+        # Sync the local copy of the repo back up to the s3 bucket.  Use the --delete option so that anything in the repo that was pruned will get removed from the bucket
+        log("Syncing local staging area to remote repo...")
+        log(execute(["/usr/bin/aws",
+                     "s3",
+                     "sync",
+                     options.localStagingArea + "/" + yumRepoBucketName,
+                     "s3://" + yumRepoBucketName + "/" + yumRepoBucketName,
+                     "--delete",
+                     "--region",
+                     options.yumRepoBucketRegion]))
+        log("Completed sync operation")
 
-    # Now that we have successfully synced the results back up to s3, remove inbox items that were just processed
-    log("Removing entries from inbox...")
-    deleteKeys(inboxKeys, skippedKeys)
-
-    log("Completed")
+        # Now that we have successfully synced the results back up to s3, remove inbox items that were just processed
+        log("Removing entries from inbox...")
+        deleteKeys(inboxKeys, skippedKeys)
+        log("Completed")
 
 ###############################################################
 ###############################################################
