@@ -292,7 +292,7 @@ def manageYumRepo():
         log(execute(["/usr/bin/aws",
                      "s3",
                      "sync",
-                     "s3://" + yumRepoBucketName + "/" + yumRepoBucketName,
+                     "s3://" + yumRepoBucketName + "/" + options.repoFolderName,
                      options.localStagingArea + "/" + yumRepoBucketName,
                      "--region",
                      options.yumRepoBucketRegion]))
@@ -313,7 +313,7 @@ def manageYumRepo():
                      "s3",
                      "sync",
                      options.localStagingArea + "/" + yumRepoBucketName,
-                     "s3://" + yumRepoBucketName + "/" + yumRepoBucketName,
+                     "s3://" + yumRepoBucketName + "/" + options.repoFolderName,
                      "--delete",
                      "--region",
                      options.yumRepoBucketRegion]))
