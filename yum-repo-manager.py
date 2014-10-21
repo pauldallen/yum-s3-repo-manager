@@ -78,7 +78,7 @@ This method is intended to record in datadog the count of any type of keys found
 The only two types used right now are the count of keys proccessed in the inbox, and the count
 of keys skipped due to any sort of exception
 """
-def recordKeys(keys, keyType = 'inbox', yumRepoBucketName):
+def recordKeys(keys, keyType = 'inbox', yumRepoBucketName = None):
     details = {}
     keyTypeLabel = "%sKeys" % keyType
     details["timestamp"] = str(datetime.datetime.now())
@@ -168,7 +168,7 @@ def getKeysInInbox(s3Cxn, yumRepoBucketName):
 Download the remote keys to the local destination folder, optionally removing a prefix from the key names
 before creating the final local directory structure.
 """
-def downloadKeys(keys, localDestination, removePrefixFromKeyName = None):
+def downloadKeys(keys, localDestination, removePrefixFromKeyName = None, yumRepoBucketName = None):
     log("Downloading keys to local staging area...")
     skippedKeys = []
     for key in keys:
@@ -186,7 +186,7 @@ def downloadKeys(keys, localDestination, removePrefixFromKeyName = None):
         except S3ResponseError, e:
             log("      --> Error downloading file from s3 [%s] - skipping..." % key.name)
             skippedKeys.append(key)
-    recordKeys(skippedKeys, 'skipped')
+    recordKeys(skippedKeys, 'skipped', yumRepoBucketName)
     return skippedKeys
 
 """
