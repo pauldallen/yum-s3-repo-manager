@@ -271,6 +271,8 @@ This is the main portion of the app that checks the inbox and coordinates gettin
 def manageYumRepo():
     for yumRepoBucketName in options.yumRepoBucketNames:
         log("=================================================")
+        log("== Working on bucket: %s" % yumRepoBucketName)
+        log("=================================================")
 
         # Get a connection to S3 through one of a couple different methods
         s3Cxn = getS3Cxn()
