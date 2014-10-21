@@ -56,7 +56,7 @@ version = "1.0.2"
 
 def parseArgs():
     parser = OptionParser("usage: %prog [options]")
-    parser.add_option("-b", "--bucket-name",        dest="yumRepoBucketNames",  default=[], action="append"                      help="The list of names of an existing S3 bucket. *NOTE* all buckets must be in the same region [default: %default]")
+    parser.add_option("-b", "--bucket-name",        dest="yumRepoBucketNames",  default=[], action="append",                     help="The list of names of an existing S3 bucket. *NOTE* all buckets must be in the same region [default: %default]")
     parser.add_option("--bucket-region",            dest="yumRepoBucketRegion", default="us-west-1",                             help="The region of the S3 bucket [default: %default]")
     parser.add_option("-i", "--inbox-folder-name",  dest="inboxFolderName",     default="inbox",                                 help="The relative folder name for the inbox inside the S3 bucket.  No preceding or trailing slash necessary. (i.e. \"inbox\") [default: %default]")
     parser.add_option("-r", "--repo-folder-name",   dest="repoFolderName",      default="repo",                                  help="The relative folder name for the actual repo inside the S3 bucket.  No preceding or trailing slash necessary. (i.e. \"repo\") [default: %default]")
