@@ -282,7 +282,7 @@ def manageYumRepo():
         recordKeys(inboxKeys, 'inbox', yumRepoBucketName)
         if len(inboxKeys) < 1:
             log("Nothing in the inbox - no work to do.")
-            return
+            continue
 
         # Since there is something in the inbox, sync the entire repo locally.  The first time, this could be pretty slow.
         # We need to be good about pruning our repos to keep them to a manageable size.
