@@ -186,17 +186,11 @@ def downloadKeys(keys, localDestination, removePrefixFromKeyName = None):
         except S3ResponseError, e:
             log("      --> Error downloading file from s3 [%s] - skipping..." % key.name)
             skippedKeys.append(key)
-        except OSError, e:
-            if e.errno == 21:
-                # folders created by CyberDuck/S3 Browser are somehow returned as keys, doesn't happen if folder is created by AWS WebUI
-                # eg: key = /inbox/test/folder1/, so /repostaging/test/folder1/ gets created on local FS, then boto tries to download 
-                # /inbox/test/folder1/ into /repostaging/test/folder1/ as a file.  That results in a OSError exception (errno 21) 
-                # Actual files under /inbox/test/folder1/ can be downloaded w/o issue.  Ignoring this "Is a directory error"
-                pass
-            else:
-                log("      --> OSError: [Errno %d] %s" %(e.errno, e.strerror))
-            skippedKeys.append(key)
         except Exception, e:
+            # folders created by S3 Browser are somehow returned as keys, doesn't happen if folder is created by AWS WebUI
+            # eg: key = /inbox/test/folder1/, so /repostaging/test/folder1/ gets created on local FS, then boto tries to download 
+            # /inbox/test/folder1/ into /repostaging/test/folder1/ as a file.  That results in a OSError exception (errno 21) 
+            # Actual files under /inbox/test/folder1/ can be downloaded w/o issue.  Ignoring this "Is a directory error"
             log("      --> Exception [%s] while downloading [%s] - skipping..." % (str(e), key.name))
             skippedKeys.append(key)
     recordKeys(skippedKeys, 'skipped')
@@ -313,7 +307,7 @@ def manageYumRepo():
     # Download the files from the inbox into the local repo staging area
     skippedKeys = downloadKeys(inboxKeys, options.localStagingArea + "/" + options.repoFolderName, options.inboxFolderName + "/")
 
-    # All the keys in inbox are bad, probably folders created by CyberDuck or S3 Browser
+    # All the keys in inbox are bad, probably folders created by S3 Browser
     # see comments in downloadKeys function for details
     if len(inboxKeys) == len(skippedKeys):
         log("Nothing in the inbox - no work to do.")
