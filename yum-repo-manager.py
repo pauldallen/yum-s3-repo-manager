@@ -60,8 +60,8 @@ def parseArgs():
     parser.add_option("--bucket-region",            dest="yumRepoBucketRegion", default="us-west-1",                             help="The region of the S3 bucket [default: %default]")
     parser.add_option("-i", "--inbox-folder-name",  dest="inboxFolderName",     default="inbox",                                 help="The relative folder name for the inbox inside the S3 bucket.  No preceding or trailing slash necessary. (i.e. \"inbox\") [default: %default]")
     parser.add_option("-r", "--repo-folder-name",   dest="repoFolderName",      default="repo",                                  help="The relative folder name for the actual repo inside the S3 bucket.  No preceding or trailing slash necessary. (i.e. \"repo\") [default: %default]")
-    parser.add_option("-l", "--local-staging-area", dest="localStagingArea",    default="/tmp/repostaging",                      help="The fully qualified path of an existing local folder where the repository work will be performed.  No trailing slash necessary. (i.e. \"/tmp/repostaging\") [default: %default]")
-    parser.add_option("-c", "--cachedir",           dest="localCache",          default="/media/ephemeral0/repocache",           help="The fully qualified path of an existing local folder where the repository cache can be stored (preferrably SSD or ephemeral disk).  No trailing slash necessary. (i.e. \"/tmp/repostaging\") [default: %default]")
+    parser.add_option("-l", "--local-staging-area", dest="localStagingArea",    default="/repostaging",                          help="The fully qualified path of an existing local folder where the repository work will be performed.  No trailing slash necessary. (i.e. \"/repostaging\") [default: %default]")
+    parser.add_option("-c", "--cachedir",           dest="localCache",          default="/media/ephemeral0/repocache",           help="The fully qualified path of an existing local folder where the repository cache can be stored (preferrably SSD or ephemeral disk).  No trailing slash necessary. (i.e. \"/media/ephemeral0/repocache\") [default: %default]")
     parser.add_option("-t", "--time-interval",      dest="timeInterval",        default="60",  type="int",                       help="The time interval and seconds between polling [default: %default]")
     parser.add_option("-d", "--debug",              dest="debug",               default=False, action="store_true",              help="Whether or not to run the app in debug mode [default: %default]")
     parser.add_option("-v", "--version",            dest="version",             default=False, action="store_true",              help="Output the version of this script and exit")
@@ -186,6 +186,13 @@ def downloadKeys(keys, localDestination, removePrefixFromKeyName = None):
         except S3ResponseError, e:
             log("      --> Error downloading file from s3 [%s] - skipping..." % key.name)
             skippedKeys.append(key)
+        except Exception, e:
+            # folders created by S3 Browser are somehow returned as keys, doesn't happen if folder is created by AWS WebUI
+            # eg: key = /inbox/test/folder1/, so /repostaging/test/folder1/ gets created on local FS, then boto tries to download 
+            # /inbox/test/folder1/ into /repostaging/test/folder1/ as a file.  That results in a OSError exception (errno 21) 
+            # Actual files under /inbox/test/folder1/ can be downloaded w/o issue.  Ignoring this "Is a directory error"
+            log("      --> Exception [%s] while downloading [%s] - skipping..." % (str(e), key.name))
+            skippedKeys.append(key)
     recordKeys(skippedKeys, 'skipped')
     return skippedKeys
 
@@ -197,8 +204,10 @@ def deleteKeys(keys, skippedKeys):
     for key in keys:
         if key not in skippedKeys:
             log("   --> deleting %s" % key.name)
-            key.delete()
-
+            try:
+                key.delete()
+            except Exception, e:
+                log("      --> Exception [%s] while deleting [%s]" % (str(e), key.name))
 """
 Execute a shell command (i.e. createrepo)
 """
@@ -297,6 +306,12 @@ def manageYumRepo():
 
     # Download the files from the inbox into the local repo staging area
     skippedKeys = downloadKeys(inboxKeys, options.localStagingArea + "/" + options.repoFolderName, options.inboxFolderName + "/")
+
+    # All the keys in inbox are bad, probably folders created by S3 Browser
+    # see comments in downloadKeys function for details
+    if len(inboxKeys) == len(skippedKeys):
+        log("Nothing in the inbox - no work to do.")
+        return
 
     # Prune old repo contents
     pruneRepo()
