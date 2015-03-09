@@ -18,10 +18,10 @@ be arranged in the repo itself.  The inbox gets polled every 60 seconds (current
 update the repo with new RPMs that have arrived since the last poll.
 
 # Installing an RPM that Lives in the Repo
-Your S3 bucket must be accessible by anyone wishing to install using your S3 repository. There are a few ways to do this,
-1. [this plugin](https://github.com/seporaitis/yum-s3-iam) to use IAM instance profiles to read from
+Your S3 bucket must be accessible by anyone wishing to install using your S3 repository. There are a few ways to do this:
+
+1. Use [this plugin](https://github.com/seporaitis/yum-s3-iam) to use IAM instance profiles to read from a private s3 bucket.  Ensure all of your instances' IAM roles allow for access.
 1. Make your S3 bucket a public 'website'
-1. Ensure all of your instances IAM roles allow for access
 
 After a new RPM has been installed to the repo, you may have to clear the local yum caches on the box before it will re-query
 the repo and ask for a new list of the available packages.  The shotgun approach is:
