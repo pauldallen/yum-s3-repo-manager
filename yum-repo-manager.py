@@ -29,6 +29,7 @@
 
 # Deps requiring separate install
 import boto                                  # https://github.com/boto/boto#installation
+import boto3
 import boto.utils
 from boto.exception import S3ResponseError
 from flask import Flask, url_for, jsonify    # http://flask.pocoo.org/
@@ -43,6 +44,7 @@ import os
 import sys
 import subprocess
 import datetime
+import uuid
 import time
 import json
 from optparse import OptionParser
@@ -62,7 +64,8 @@ def parseArgs():
     parser.add_option("-r", "--repo-folder-name",   dest="repoFolderName",      default="repo",                                  help="The relative folder name for the actual repo inside the S3 bucket.  No preceding or trailing slash necessary. (i.e. \"repo\") [default: %default]")
     parser.add_option("-l", "--local-staging-area", dest="localStagingArea",    default="/repostaging",                          help="The fully qualified path of an existing local folder where the repository work will be performed.  No trailing slash necessary. (i.e. \"/repostaging\") [default: %default]")
     parser.add_option("-c", "--cachedir",           dest="localCache",          default="/media/ephemeral0/repocache",           help="The fully qualified path of an existing local folder where the repository cache can be stored (preferrably SSD or ephemeral disk).  No trailing slash necessary. (i.e. \"/media/ephemeral0/repocache\") [default: %default]")
-    parser.add_option("-t", "--time-interval",      dest="timeInterval",        default="60",  type="int",                       help="The time interval and seconds between polling [default: %default]")
+    ## changing 60 to 86400 (86400 = 60 * 60 * 24 = 1 day)
+    parser.add_option("-t", "--time-interval",      dest="timeInterval",        default="86400",  type="int",                       help="The time interval and seconds between polling [default: %default]")
     parser.add_option("-d", "--debug",              dest="debug",               default=False, action="store_true",              help="Whether or not to run the app in debug mode [default: %default]")
     parser.add_option("-v", "--version",            dest="version",             default=False, action="store_true",              help="Output the version of this script and exit")
     parser.add_option("--log-file",                 dest="logFile",             default="/var/log/yum-repo-manager/manager.log", help="The log file in which to dump debug information [default: %default]")
@@ -148,21 +151,22 @@ def getS3Cxn():
 
         return boto.connect_s3(accessKeyId, secretAccessKey)
 
-"""
-Iterates over all the keys in the buckets "inbox" folder and returns an array
-of the boto.s3.key.Key objects corresponding to files that need to be copied.  
-"""
-def getKeysInInbox(s3Cxn):
-    log("Checking inbox...")
-    inbox = []
-    bucket = s3Cxn.get_bucket(options.yumRepoBucketName, validate=False)
-    log("   --> obtained bucket")
-    keys = bucket.list(prefix=options.inboxFolderName + "/")
-    log("   --> obtained keys")
-    for key in keys:
-        if key.size > 0:
-            inbox.append(key)
-    return inbox
+## NO LONGER NEEDED
+# """
+# Iterates over all the keys in the buckets "inbox" folder and returns an array
+# of the boto.s3.key.Key objects corresponding to files that need to be copied.  
+# """
+# def getKeysInInbox(s3Cxn):
+#     log("Checking inbox...")
+#     inbox = []
+#     bucket = s3Cxn.get_bucket(options.yumRepoBucketName, validate=False)
+#     log("   --> obtained bucket")
+#     keys = bucket.list(prefix=options.inboxFolderName + "/")
+#     log("   --> obtained keys")
+#     for key in keys:
+#         if key.size > 0:
+#             inbox.append(key)
+#     return inbox
 
 """
 Download the remote keys to the local destination folder, optionally removing a prefix from the key names
@@ -196,18 +200,19 @@ def downloadKeys(keys, localDestination, removePrefixFromKeyName = None):
     recordKeys(skippedKeys, 'skipped')
     return skippedKeys
 
-"""
-Delete the provided list of S3 keys, leaving around anything in skippedKeys
-"""
-def deleteKeys(keys, skippedKeys):
-    # Now that everything has been successfully copied - delete the source keys
-    for key in keys:
-        if key not in skippedKeys:
-            log("   --> deleting %s" % key.name)
-            try:
-                key.delete()
-            except Exception, e:
-                log("      --> Exception [%s] while deleting [%s]" % (str(e), key.name))
+## NO LONGER NEEDED
+# """
+# Delete the provided list of S3 keys, leaving around anything in skippedKeys
+# """
+# def deleteKeys(keys, skippedKeys):
+#     # Now that everything has been successfully copied - delete the source keys
+#     for key in keys:
+#         if key not in skippedKeys:
+#             log("   --> deleting %s" % key.name)
+#             try:
+#                 key.delete()
+#             except Exception, e:
+#                 log("      --> Exception [%s] while deleting [%s]" % (str(e), key.name))
 """
 Execute a shell command (i.e. createrepo)
 """
@@ -283,12 +288,14 @@ def manageYumRepo():
     # Get a connection to S3 through one of a couple different methods
     s3Cxn = getS3Cxn()
 
-    # Look in the inbox to see if there are any new files to add to the repo
-    inboxKeys = getKeysInInbox(s3Cxn)
-    recordKeys(inboxKeys, 'inbox')
-    if len(inboxKeys) < 1:
-        log("Nothing in the inbox - no work to do.")
-        return
+    ## COMMENTING OUT as we want to manage inbox items via yum_repo_manager_ecs now
+    ## COMMENTING OUT as we still want to perform createrepo and prunerepo daily
+    # # Look in the inbox to see if there are any new files to add to the repo
+    # inboxKeys = getKeysInInbox(s3Cxn)
+    # recordKeys(inboxKeys, 'inbox')
+    # if len(inboxKeys) < 1:
+    #     log("Nothing in the inbox - no work to do.")
+    #     return
 
     # Since there is something in the inbox, sync the entire repo locally.  The first time, this could be pretty slow.
     # We need to be good about pruning our repos to keep them to a manageable size.
@@ -304,14 +311,17 @@ def manageYumRepo():
                  options.yumRepoBucketRegion]))
     log("Completed sync operation")
 
-    # Download the files from the inbox into the local repo staging area
-    skippedKeys = downloadKeys(inboxKeys, options.localStagingArea + "/" + options.repoFolderName, options.inboxFolderName + "/")
+    ## COMMENTING this out as we want to manage this via yum_repo_manager_ecs now
+    # # Download the files from the inbox into the local repo staging area
+    # skippedKeys = downloadKeys(inboxKeys, options.localStagingArea + "/" + options.repoFolderName, options.inboxFolderName + "/")
 
+    ## COMMENTING OUT as we want to manage inbox items via yum_repo_manager_ecs now
+    ## COMMENTING OUT as we still want to perform createrepo and prunerepo daily
     # All the keys in inbox are bad, probably folders created by S3 Browser
     # see comments in downloadKeys function for details
-    if len(inboxKeys) == len(skippedKeys):
-        log("Nothing in the inbox - no work to do.")
-        return
+    # if len(inboxKeys) == len(skippedKeys):
+    #     log("Nothing in the inbox - no work to do.")
+    #     return
 
     # Prune old repo contents
     pruneRepo()
@@ -331,11 +341,171 @@ def manageYumRepo():
                  options.yumRepoBucketRegion]))
     log("Completed sync operation")
 
+    ## COMMENTING OUT as we want to manage this via yum_repo_manager_ecs now
+    ## COMMENTING OUT as we still want to perform createrepo and prunerepo daily
     # Now that we have successfully synced the results back up to s3, remove inbox items that were just processed
-    log("Removing entries from inbox...")
-    deleteKeys(inboxKeys, skippedKeys)
+    # log("Removing entries from inbox...")
+    # deleteKeys(inboxKeys, skippedKeys)
 
     log("Completed")
+
+def millis_in_future(millis):
+    return time.time() + (millis/1000.0)
+
+"""
+Get a connection to DynamoDB through one of two possible methods.
+
+    Method 1: If we are in AWS - just create a connection relying on IAM instance profiles to provide
+              the necessary levels of authentication and authorization
+    Method 2: If not in AWS - read the regular AWS CLI's config file to get the access key and secret key.
+"""
+def getDynamoConnection():
+    log("Obtaining Dynamo connection...")
+    # If we are in AWS, then rely on instance profiles to provide the creds for us. Otherwise, read them from the standard AWS CLI configs.
+    #if len(boto.utils.get_instance_metadata(timeout=1, num_retries=0).keys()) > 0:
+    try:
+        return boto3.client(
+            'dynamodb',
+            region_name=options.yumRepoBucketRegion
+        )
+    except OSError, e:
+        # Parse the main AWS CLI config file
+        config = ConfigParser.ConfigParser()
+        config.read(os.path.expanduser('~/.aws/config'))
+        profileName = "lithiumdev"
+        sectionName = "profile %s" % profileName
+
+        # Read the authentication args from the main AWS CLI config file so that boto doesn't need its own
+        accessKeyId = config.get(sectionName, "aws_access_key_id")
+        secretAccessKey = config.get(sectionName, "aws_secret_access_key")
+
+        return boto3.client(
+            'dynamodb',
+            region_name=options.yumRepoBucketRegion,
+            aws_access_key_id=accessKeyId,
+            aws_secret_access_key=secretAccessKey
+        )
+
+def acquireDynamoLock(table, lockName, timeoutMillis):
+    log("Acquiring DynamoDB Lock for table [{}] name [{}]".format(table, lockName))
+    global guid, locked
+    ## get the row for lockName
+    get_item_params = {
+        'TableName': table,
+        'Key': { 'name': { 'S': lockName, } },
+        'AttributesToGet': [
+            'guid', 'expiresOn'
+        ],
+        'ConsistentRead': True,
+    }
+
+    ## generate guid for lock
+    guid = str(uuid.uuid4())
+
+    ## item to put
+    put_item_params = {
+        'TableName': table,
+        'Item': {
+            'name': { 'S': lockName },
+            'guid': { 'S': guid },
+            'expiresOn': { 'N': str(millis_in_future(timeoutMillis)) }
+        }
+    }
+
+    try:
+        data = db.get_item(**get_item_params)
+        now = time.time()
+
+        if 'Item' not in data:
+            ## Table exists, but lock not found. We'll try to add a lock
+            ## If by the time we try to add we find that the attribute guid 
+            ## exists (because another client grabbed it), the lock will not be added
+            put_item_params['ConditionExpression'] = 'attribute_not_exists(guid)'
+
+        ## We know there's possibly a lock. Check to see if it's expired yet
+        elif float(data['Item']['expiresOn']['N']) > now:
+            log("lock is currently acquired by another process and is NOT expired")
+            return False
+        else:
+            ## We know there's possibly a lock and it's expired. We'll take over, providing 
+            ## that the guid of the lock we read as expired is the one we're taking over from. 
+            ## This is an atomic conditional update
+            log("Expired lock found. Attempting to aquire")
+            put_item_params['ExpressionAttributeValues'] = {
+                ':oldguid': {'S': data['Item']['guid']['S']}
+            }
+            put_item_params['ConditionExpression'] = "guid = :oldguid"
+    except Exception as e:
+        log("Exception" + str(e))
+        ## something really bad happened, such as table not found
+        return False
+
+    ## now we're going to try to get the lock. If ANY exception happens, we assume no lock
+    try:
+        db.put_item(**put_item_params)
+        locked = True
+        guid = guid
+        return True
+    except Exception:
+        return False
+
+def releaseDynamoLock(table, lockName):
+    log("Release lock for table [{}] name [{}]".format(table, lockName))
+    global guid, locked
+
+    if not locked:
+        return
+
+    delete_item_params = {
+        'Key': {
+            'name': { 'S': lockName }
+        },
+        'ExpressionAttributeValues': {
+            ':ourguid': {'S': guid}
+        },
+        'TableName': lockTableName,
+        'ConditionExpression': "guid = :ourguid"
+    }
+
+    try:
+        db.delete_item(**delete_item_params)
+        locked = False
+        guid = ""
+    except Exception as e:
+        log(str(e))
+
+def spinlock(table, lockName, locktimeoutMillis, acquireTimeoutMillis):
+    acquireTimeout = millis_in_future(acquireTimeoutMillis)
+    while not acquireDynamoLock(table, lockName, locktimeoutMillis):
+        log("could not acquire lock, sleeping 10 seconds and trying again...")
+        time.sleep(10)
+        if time.time() > acquireTimeout:
+            log("ERROR: acquire lock timeout")
+            sys.exit(1)
+        pass
+
+def manageWrapper():
+    ###################################
+    ## get DynamoDB lock
+    ## lock vars
+    locked  = False
+    guid = ""
+    lockTableName = "CloudOpsAppLock"
+    lockName = 'YumRepoSync'
+    lockTimeout= float(120000.0) ## 2 minute
+    acquireTimeout = float(900000.0) ## 15 minutes
+    
+    ## get dynamo connection
+    db = getDynamoConnection()
+
+    ## acquire lock for execution
+    spinlock(lockTableName, lockName, lockTimeout, acquireTimeout)
+
+    try:
+        manageYumRepo():
+    finally:
+        releaseDynamoLock(lockTableName, lockName)
+
 
 ###############################################################
 ###############################################################
@@ -379,7 +549,7 @@ print "Logging output to %s" % options.logFile
 # Schedule the yum manager job to run
 sched = Scheduler()
 log("Scheduling management job to run every %d seconds..." % options.timeInterval)
-sched.add_interval_job(manageYumRepo, seconds=options.timeInterval, max_instances=1)
+sched.add_interval_job(manageWrapper, seconds=options.timeInterval, max_instances=1)
 sched.start()
 
 # Initialize flask
